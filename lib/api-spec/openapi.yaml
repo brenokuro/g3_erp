@@ -3,13 +3,23 @@ info:
   # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: API for a small 3D printing business ERP
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
     description: Health operations
+  - name: Auth
+    description: Browser authentication
+  - name: Dashboard
+    description: Business overview
+  - name: Clients
+    description: Customer management
+  - name: Orders
+    description: 3D print projects and production status
+  - name: Storage
+    description: Order document uploads
 paths:
   /healthz:
     get:
@@ -24,13 +34,585 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+  /auth/user:
+    get:
+      operationId: getCurrentAuthUser
+      tags: [Auth]
+      summary: Get current authenticated user
+      responses:
+        "200":
+          description: Current authentication state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthUserEnvelope"
+  /login:
+    get:
+      operationId: beginBrowserLogin
+      tags: [Auth]
+      summary: Start browser login
+      parameters:
+        - name: returnTo
+          in: query
+          required: false
+          schema: { type: string }
+      responses:
+        "302": { description: Redirect to sign-in provider }
+  /callback:
+    get:
+      operationId: handleBrowserLoginCallback
+      tags: [Auth]
+      summary: Complete browser login
+      responses:
+        "302": { description: Redirect after sign-in }
+  /logout:
+    get:
+      operationId: logoutBrowserSession
+      tags: [Auth]
+      summary: End browser session
+      parameters:
+        - name: returnTo
+          in: query
+          required: false
+          schema: { type: string }
+      responses:
+        "302": { description: Redirect after sign-out }
+  /mobile-auth/token-exchange:
+    post:
+      operationId: exchangeMobileAuthorizationCode
+      tags: [Auth]
+      summary: Exchange a mobile login code for a session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/MobileTokenExchangeRequest" }
+      responses:
+        "200":
+          description: Mobile session token
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MobileTokenExchangeSuccess" }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/BadRequest"
+  /mobile-auth/logout:
+    post:
+      operationId: logoutMobileSession
+      tags: [Auth]
+      summary: End a mobile session
+      responses:
+        "200":
+          description: Mobile logout processed
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LogoutSuccess" }
+  /dashboard:
+    get:
+      operationId: getDashboard
+      tags: [Dashboard]
+      summary: Get ERP dashboard totals and recent orders
+      responses:
+        "200":
+          description: Dashboard summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Dashboard"
+  /clients:
+    get:
+      operationId: listClients
+      tags: [Clients]
+      summary: List clients
+      parameters:
+        - name: search
+          in: query
+          required: false
+          schema: { type: string }
+      responses:
+        "200":
+          description: Client list
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Client" }
+    post:
+      operationId: createClient
+      tags: [Clients]
+      summary: Add a client
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ClientInput" }
+      responses:
+        "201":
+          description: Client created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Client" }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+  /clients/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: integer }
+    get:
+      operationId: getClient
+      tags: [Clients]
+      summary: Get a client
+      responses:
+        "200":
+          description: Client record
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Client" }
+        "404":
+          $ref: "#/components/responses/NotFound"
+    patch:
+      operationId: updateClient
+      tags: [Clients]
+      summary: Update a client
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ClientUpdate" }
+      responses:
+        "200":
+          description: Updated client
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Client" }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      operationId: deleteClient
+      tags: [Clients]
+      summary: Delete a client with no orders
+      responses:
+        "204": { description: Client deleted }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /orders:
+    get:
+      operationId: listOrders
+      tags: [Orders]
+      summary: List and search orders
+      parameters:
+        - name: search
+          in: query
+          required: false
+          schema: { type: string }
+        - name: status
+          in: query
+          required: false
+          schema: { $ref: "#/components/schemas/OrderStatus" }
+      responses:
+        "200":
+          description: Orders and linked client names
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Order" }
+    post:
+      operationId: createOrder
+      tags: [Orders]
+      summary: Create a print order
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/OrderInput" }
+      responses:
+        "201":
+          description: Order created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Order" }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+  /orders/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: integer }
+    get:
+      operationId: getOrder
+      tags: [Orders]
+      summary: Get an order
+      responses:
+        "200":
+          description: Order details
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Order" }
+        "404":
+          $ref: "#/components/responses/NotFound"
+    patch:
+      operationId: updateOrder
+      tags: [Orders]
+      summary: Update order or production status
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/OrderUpdate" }
+      responses:
+        "200":
+          description: Updated order
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Order" }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      operationId: deleteOrder
+      tags: [Orders]
+      summary: Delete an order
+      responses:
+        "204": { description: Order deleted }
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /orders/{id}/events:
+    get:
+      operationId: listOrderEvents
+      tags: [Orders]
+      summary: Get project status history
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Order timeline
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/OrderEvent" }
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /orders/{id}/attachments:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: integer }
+    get:
+      operationId: listOrderAttachments
+      tags: [Orders]
+      summary: List order documents
+      responses:
+        "200":
+          description: Document metadata
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Attachment" }
+        "404":
+          $ref: "#/components/responses/NotFound"
+    post:
+      operationId: createOrderAttachment
+      tags: [Orders]
+      summary: Save uploaded document metadata
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AttachmentInput" }
+      responses:
+        "201":
+          description: Document metadata saved
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Attachment" }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /orders/{id}/attachments/{attachmentId}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: integer }
+      - name: attachmentId
+        in: path
+        required: true
+        schema: { type: integer }
+    delete:
+      operationId: deleteOrderAttachment
+      tags: [Orders]
+      summary: Remove document metadata
+      responses:
+        "204": { description: Attachment removed }
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /storage/uploads/request-url:
+    post:
+      operationId: requestUploadUrl
+      tags: [Storage]
+      summary: Request a private file upload URL
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UploadUrlRequest" }
+      responses:
+        "200":
+          description: Presigned upload URL
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UploadUrlResponse" }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+  /storage/objects/{objectPath}:
+    get:
+      operationId: getStorageObject
+      tags: [Storage]
+      summary: Serve a private uploaded document
+      parameters:
+        - name: objectPath
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Private file contents
+          content:
+            "*/*":
+              schema: { type: string, format: binary }
+        "401":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
 components:
+  responses:
+    BadRequest:
+      description: Invalid request
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+    NotFound:
+      description: Record not found
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorEnvelope" }
   schemas:
     HealthStatus:
       type: object
       properties:
-        status:
-          type: string
-      required:
-        - status
+        status: { type: string }
+      required: [status]
+    ErrorEnvelope:
+      type: object
+      required: [error]
+      properties:
+        error: { type: string }
+    AuthUser:
+      type: object
+      required: [id, email, firstName, lastName, profileImageUrl]
+      properties:
+        id: { type: string }
+        email: { type: [string, "null"], format: email }
+        firstName: { type: [string, "null"] }
+        lastName: { type: [string, "null"] }
+        profileImageUrl: { type: [string, "null"] }
+    AuthUserEnvelope:
+      type: object
+      required: [user]
+      properties:
+        user:
+          oneOf:
+            - { $ref: "#/components/schemas/AuthUser" }
+            - { type: "null" }
+    MobileTokenExchangeRequest:
+      type: object
+      required: [code, code_verifier, redirect_uri, state]
+      properties:
+        code: { type: string, minLength: 1 }
+        code_verifier: { type: string, minLength: 1 }
+        redirect_uri: { type: string, minLength: 1, format: uri }
+        state: { type: string, minLength: 1 }
+        nonce: { type: string, minLength: 1 }
+    MobileTokenExchangeSuccess:
+      type: object
+      required: [token]
+      properties:
+        token: { type: string }
+    LogoutSuccess:
+      type: object
+      required: [success]
+      properties:
+        success: { type: boolean, const: true }
+    OrderStatus:
+      type: string
+      enum:
+        - orcamento
+        - aguardando_aprovacao
+        - em_impressao
+        - pos_processamento
+        - pronto
+        - entregue
+        - cancelado
+    Client:
+      type: object
+      required: [id, name, companyName, email, phone, document, address, notes, createdAt, updatedAt]
+      properties:
+        id: { type: integer }
+        name: { type: string }
+        companyName: { type: [string, "null"] }
+        email: { type: [string, "null"], format: email }
+        phone: { type: [string, "null"] }
+        document: { type: [string, "null"] }
+        address: { type: [string, "null"] }
+        notes: { type: [string, "null"] }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    ClientInput:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string, minLength: 1 }
+        companyName: { type: [string, "null"] }
+        email: { type: [string, "null"], format: email }
+        phone: { type: [string, "null"] }
+        document: { type: [string, "null"] }
+        address: { type: [string, "null"] }
+        notes: { type: [string, "null"] }
+    ClientUpdate:
+      type: object
+      properties:
+        name: { type: string, minLength: 1 }
+        companyName: { type: [string, "null"] }
+        email: { type: [string, "null"], format: email }
+        phone: { type: [string, "null"] }
+        document: { type: [string, "null"] }
+        address: { type: [string, "null"] }
+        notes: { type: [string, "null"] }
+    Order:
+      type: object
+      required: [id, orderNumber, clientId, clientName, title, description, material, color, quantity, amount, status, dueDate, createdAt, updatedAt]
+      properties:
+        id: { type: integer }
+        orderNumber: { type: string }
+        clientId: { type: integer }
+        clientName: { type: string }
+        title: { type: string }
+        description: { type: [string, "null"] }
+        material: { type: [string, "null"] }
+        color: { type: [string, "null"] }
+        quantity: { type: integer }
+        amount: { type: number }
+        status: { $ref: "#/components/schemas/OrderStatus" }
+        dueDate: { type: [string, "null"] }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    OrderInput:
+      type: object
+      required: [clientId, title, quantity, amount]
+      properties:
+        clientId: { type: integer }
+        title: { type: string, minLength: 1 }
+        description: { type: [string, "null"] }
+        material: { type: [string, "null"] }
+        color: { type: [string, "null"] }
+        quantity: { type: integer, minimum: 1 }
+        amount: { type: number, minimum: 0 }
+        status: { $ref: "#/components/schemas/OrderStatus" }
+        dueDate: { type: [string, "null"] }
+    OrderUpdate:
+      type: object
+      properties:
+        clientId: { type: integer }
+        title: { type: string, minLength: 1 }
+        description: { type: [string, "null"] }
+        material: { type: [string, "null"] }
+        color: { type: [string, "null"] }
+        quantity: { type: integer, minimum: 1 }
+        amount: { type: number, minimum: 0 }
+        status: { $ref: "#/components/schemas/OrderStatus" }
+        dueDate: { type: [string, "null"] }
+    OrderEvent:
+      type: object
+      required: [id, orderId, fromStatus, toStatus, note, createdAt]
+      properties:
+        id: { type: integer }
+        orderId: { type: integer }
+        fromStatus: { oneOf: [{ $ref: "#/components/schemas/OrderStatus" }, { type: "null" }] }
+        toStatus: { $ref: "#/components/schemas/OrderStatus" }
+        note: { type: [string, "null"] }
+        createdAt: { type: string, format: date-time }
+    Attachment:
+      type: object
+      required: [id, orderId, fileName, contentType, size, category, objectPath, createdAt]
+      properties:
+        id: { type: integer }
+        orderId: { type: integer }
+        fileName: { type: string }
+        contentType: { type: string }
+        size: { type: integer }
+        category: { type: string }
+        objectPath: { type: string }
+        createdAt: { type: string, format: date-time }
+    AttachmentInput:
+      type: object
+      required: [fileName, contentType, size, category, objectPath]
+      properties:
+        fileName: { type: string, minLength: 1 }
+        contentType: { type: string, minLength: 1 }
+        size: { type: integer, minimum: 1 }
+        category: { type: string, enum: [nota_fiscal, orcamento, referencia, outro] }
+        objectPath: { type: string, minLength: 1 }
+    UploadUrlRequest:
+      type: object
+      required: [name, size, contentType]
+      properties:
+        name: { type: string, minLength: 1 }
+        size: { type: integer, minimum: 1, maximum: 10485760 }
+        contentType: { type: string, minLength: 1 }
+    UploadUrlResponse:
+      type: object
+      required: [uploadURL, objectPath]
+      properties:
+        uploadURL: { type: string, format: uri }
+        objectPath: { type: string }
+        metadata: { $ref: "#/components/schemas/UploadUrlRequest" }
+    StatusCount:
+      type: object
+      required: [status, count]
+      properties:
+        status: { $ref: "#/components/schemas/OrderStatus" }
+        count: { type: integer }
+    Dashboard:
+      type: object
+      required: [clientsCount, openOrders, monthRevenue, pendingValue, statusCounts, recentOrders]
+      properties:
+        clientsCount: { type: integer }
+        openOrders: { type: integer }
+        monthRevenue: { type: number }
+        pendingValue: { type: number }
+        statusCounts:
+          type: array
+          items: { $ref: "#/components/schemas/StatusCount" }
+        recentOrders:
+          type: array
+          items: { $ref: "#/components/schemas/Order" }
 

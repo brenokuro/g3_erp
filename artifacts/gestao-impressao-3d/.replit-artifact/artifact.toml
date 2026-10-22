@@ -1,0 +1,28 @@
+kind = "web"
+previewPath = "/"
+title = "Gestão 3D"
+description = "ERP simples para uma empresa de impressão 3D: cadastro de clientes, acompanhamento de pedidos e projetos, etapas de produção, valores e documentos anexados."
+version = "1.0.0"
+id = "artifacts/gestao-impressao-3d"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 18597
+
+[services.development]
+run = "pnpm --filter @workspace/gestao-impressao-3d run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/gestao-impressao-3d", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/gestao-impressao-3d/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "18597"
+BASE_PATH = "/"
