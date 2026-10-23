@@ -10,7 +10,7 @@
   "scripts": {
     "preinstall": "sh -c 'rm -f package-lock.json yarn.lock; case \"$npm_config_user_agent\" in pnpm/*) ;; *) echo \"Use pnpm instead\" >&2; exit 1 ;; esac'",
     "build": "pnpm run typecheck && pnpm -r --if-present run build",
-    "build:vercel": "pnpm --filter @workspace/gestao-impressao-3d run build",
+    "build:vercel": "pnpm --filter @workspace/api-server run build && pnpm --filter @workspace/gestao-impressao-3d run build",
     "dev:api": "pnpm --filter @workspace/api-server run dev",
     "dev:web": "pnpm --filter @workspace/gestao-impressao-3d run dev",
     "typecheck:libs": "tsc --build",
