@@ -1,4 +1,5 @@
-import { type FormEvent, type InputHTMLAttributes, type ReactNode, useMemo, useState } from 'react';
+import { type FormEvent, type InputHTMLAttributes, type ReactNode, useEffect, useMemo, useState } from 'react';
+import { FcGoogle } from 'react-icons/fc';
 import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query';
 import { upload } from '@vercel/blob/client';
 import { ErrorBoundary } from '@/components/error-boundary';
@@ -35,11 +36,47 @@ function LoginForm() {
   const {login,isLoggingIn,error,clearError}=useAuth();
   const [email,setEmail]=useState('');
   const [password,setPassword]=useState('');
-  const submit=async(e:FormEvent)=>{e.preventDefault();try{await login(email,password);}catch{/* erro exibido pelo hook */}};
+  const [urlError,setUrlError]=useState<string|null>(null);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const err = params.get('error');
+    if (err) {
+      setUrlError(err);
+      window.history.replaceState({}, '', window.location.pathname);
+    }
+  }, []);
+
+  const submit=async(e:FormEvent)=>{
+    e.preventDefault();
+    setUrlError(null);
+    try{await login(email,password);}catch{/* erro exibido pelo hook */}
+  };
+
+  const handleGoogleLogin = () => {
+    window.location.href = '/api/auth/google';
+  };
+
+  const displayError = error || urlError;
+
   return <form className="auth-login-form" onSubmit={submit}>
-    <label><span>E-mail</span><input className="text-input" type="email" autoComplete="email" required value={email} onChange={e=>{clearError();setEmail(e.target.value);}} placeholder="voce@oficina.com" data-testid="input-login-email"/></label>
-    <label><span>Senha</span><input className="text-input" type="password" autoComplete="current-password" required value={password} onChange={e=>{clearError();setPassword(e.target.value);}} placeholder="Sua senha" data-testid="input-login-password"/></label>
-    {error&&<p className="form-error" role="alert">{error}</p>}
+    <button
+      type="button"
+      className="btn-google"
+      onClick={handleGoogleLogin}
+      data-testid="button-login-google"
+    >
+      <FcGoogle size={20}/>
+      <span>Entrar com o Google</span>
+    </button>
+
+    <div className="auth-divider">
+      <span>ou com e-mail e senha</span>
+    </div>
+
+    <label><span>E-mail</span><input className="text-input" type="email" autoComplete="email" required value={email} onChange={e=>{clearError();setUrlError(null);setEmail(e.target.value);}} placeholder="voce@oficina.com" data-testid="input-login-email"/></label>
+    <label><span>Senha</span><input className="text-input" type="password" autoComplete="current-password" required value={password} onChange={e=>{clearError();setUrlError(null);setPassword(e.target.value);}} placeholder="Sua senha" data-testid="input-login-password"/></label>
+    {displayError&&<p className="form-error" role="alert">{displayError}</p>}
     <button className="btn btn-primary" type="submit" disabled={isLoggingIn} data-testid="button-sign-in"><LogIn size={17}/>{isLoggingIn?'Entrando…':'Entrar na conta'}</button>
   </form>;
 }
