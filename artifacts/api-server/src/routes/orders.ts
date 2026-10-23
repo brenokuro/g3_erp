@@ -30,12 +30,13 @@ import {
 } from "@workspace/db";
 import { Router, type IRouter } from "express";
 import {
+  deleteObject,
+  getObjectMetadata,
+  isValidBlobPathname,
   ObjectNotFoundError,
-  ObjectStorageService,
 } from "../lib/objectStorage";
 
 const router: IRouter = Router();
-const storage = new ObjectStorageService();
 
 type OrderRow = typeof ordersTable.$inferSelect;
 
@@ -69,8 +70,7 @@ async function findOwnedOrder(id: number, ownerId: string) {
 
 async function removeStoredObject(objectPath: string): Promise<void> {
   try {
-    const file = await storage.getObjectEntityFile(objectPath);
-    await file.delete({ ignoreNotFound: true });
+    await deleteObject(objectPath);
   } catch (error) {
     if (!(error instanceof ObjectNotFoundError)) throw error;
   }
@@ -413,14 +413,16 @@ router.post("/orders/:id/attachments", async (req, res): Promise<void> => {
     return;
   }
 
-  if (!/^\/objects\/uploads\/[0-9a-f-]+$/i.test(parsed.data.objectPath)) {
+  if (
+    !isValidBlobPathname(parsed.data.objectPath) ||
+    !parsed.data.objectPath.startsWith(`orders/${order.id}/`)
+  ) {
     res.status(400).json({ error: "Invalid private document path" });
     return;
   }
 
   try {
-    const file = await storage.getObjectEntityFile(parsed.data.objectPath);
-    const [metadata] = await file.getMetadata();
+    const metadata = await getObjectMetadata(parsed.data.objectPath);
     if (
       Number(metadata.size) !== parsed.data.size ||
       (metadata.contentType && metadata.contentType !== parsed.data.contentType)

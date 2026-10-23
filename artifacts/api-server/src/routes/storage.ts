@@ -1,19 +1,21 @@
 import { Readable } from 'stream';
 import {
-  RequestUploadUrlBody,
-  RequestUploadUrlResponse,
-} from '@workspace/api-zod';
+  handleUpload,
+  type HandleUploadBody,
+} from '@vercel/blob/client';
 import { and, eq } from 'drizzle-orm';
-import { attachmentsTable, db } from '@workspace/db';
+import { attachmentsTable, db, ordersTable } from '@workspace/db';
 import { Router, type IRouter, type Request, type Response } from 'express';
 
 import {
+  downloadObject,
+  isBlobUploadConfigured,
+  isValidBlobPathname,
   ObjectNotFoundError,
-  ObjectStorageService,
 } from '../lib/objectStorage';
 
 const router: IRouter = Router();
-const objectStorageService = new ObjectStorageService();
+
 const allowedUploadTypes = new Set([
   'application/pdf',
   'image/jpeg',
@@ -22,102 +24,89 @@ const allowedUploadTypes = new Set([
   'text/plain',
 ]);
 
-function hasAuthenticatedSession(
-  req: Request,
-): req is Request & { isAuthenticated: () => boolean } {
-  if (
-    !('isAuthenticated' in req) ||
-    typeof req.isAuthenticated !== 'function'
-  ) {
-    return false;
-  }
-
-  return req.isAuthenticated();
-}
+const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
 
 /**
  * POST /storage/uploads/request-url
  *
- * Request a presigned URL for file upload.
- * The client sends JSON metadata (name, size, contentType) — NOT the file.
- * Then uploads the file directly to the returned presigned URL.
- * Requires auth middleware so public callers cannot mint write-capable URLs.
+ * Generates a short-lived client token so the browser can upload a document
+ * directly to Vercel Blob without sending the file through the API.
  */
 router.post(
   '/storage/uploads/request-url',
   async (req: Request, res: Response) => {
-    if (!hasAuthenticatedSession(req)) {
+    if (!req.isAuthenticated()) {
       res.status(401).json({ error: 'Unauthorized' });
-
       return;
     }
 
-    const parsed = RequestUploadUrlBody.safeParse(req.body);
-    if (!parsed.success) {
-      res.status(400).json({ error: 'Missing or invalid required fields' });
+    if (!isBlobUploadConfigured()) {
+      res.status(503).json({
+        error:
+          'Armazenamento de arquivos não configurado. Defina BLOB_READ_WRITE_TOKEN.',
+      });
       return;
     }
 
+    const body = req.body as HandleUploadBody;
+
     try {
-      const { name, size, contentType } = parsed.data;
-      if (!allowedUploadTypes.has(contentType)) {
-        res.status(400).json({ error: 'Unsupported document type' });
-        return;
-      }
+      const jsonResponse = await handleUpload({
+        body,
+        request: req,
+        onBeforeGenerateToken: async (pathname, clientPayload) => {
+          const payload = parseClientPayload(clientPayload);
+          if (!payload) {
+            throw new Error('Payload de upload inválido.');
+          }
+          if (!allowedUploadTypes.has(payload.contentType)) {
+            throw new Error('Tipo de documento não suportado.');
+          }
+          if (payload.size > MAX_UPLOAD_BYTES) {
+            throw new Error('O arquivo deve ter até 10 MB.');
+          }
+          if (
+            !isValidBlobPathname(pathname) ||
+            !pathname.startsWith(`orders/${payload.orderId}/`)
+          ) {
+            throw new Error('Caminho de upload inválido.');
+          }
 
-      const uploadURL = await objectStorageService.getObjectEntityUploadURL();
-      const objectPath =
-        objectStorageService.normalizeObjectEntityPath(uploadURL);
+          const [order] = await db
+            .select({ id: ordersTable.id })
+            .from(ordersTable)
+            .where(
+              and(
+                eq(ordersTable.id, payload.orderId),
+                eq(ordersTable.ownerId, req.user!.id),
+              ),
+            )
+            .limit(1);
+          if (!order) {
+            throw new Error('Pedido não encontrado.');
+          }
 
-      res.json(
-        RequestUploadUrlResponse.parse({
-          uploadURL,
-          objectPath,
-          metadata: { name, size, contentType },
-        }),
-      );
+          return {
+            allowedContentTypes: [...allowedUploadTypes],
+            maximumSizeInBytes: MAX_UPLOAD_BYTES,
+            addRandomSuffix: false,
+            tokenPayload: JSON.stringify({
+              userId: req.user!.id,
+              orderId: payload.orderId,
+            }),
+          };
+        },
+      });
+
+      res.json(jsonResponse);
     } catch (error) {
-      req.log.error({ err: error }, 'Error generating upload URL');
-      res.status(500).json({ error: 'Failed to generate upload URL' });
-    }
-  },
-);
-
-/**
- * GET /storage/public-objects/*
- *
- * Serve public assets from PUBLIC_OBJECT_SEARCH_PATHS.
- * These are unconditionally public — no authentication or ACL checks.
- * IMPORTANT: Always provide this endpoint when object storage is set up.
- */
-router.get(
-  '/storage/public-objects/*filePath',
-  async (req: Request, res: Response) => {
-    try {
-      const raw = req.params.filePath;
-      const filePath = Array.isArray(raw) ? raw.join('/') : raw;
-      const file = await objectStorageService.searchPublicObject(filePath);
-      if (!file) {
-        res.status(404).json({ error: 'File not found' });
-        return;
-      }
-
-      const response = await objectStorageService.downloadObject(file);
-
-      res.status(response.status);
-      response.headers.forEach((value, key) => res.setHeader(key, value));
-
-      if (response.body) {
-        const nodeStream = Readable.fromWeb(
-          response.body as ReadableStream<Uint8Array>,
-        );
-        nodeStream.pipe(res);
-      } else {
-        res.end();
-      }
-    } catch (error) {
-      req.log.error({ err: error }, 'Error serving public object');
-      res.status(500).json({ error: 'Failed to serve public object' });
+      req.log.warn({ err: error }, 'Error generating upload token');
+      res.status(400).json({
+        error:
+          error instanceof Error
+            ? error.message
+            : 'Não foi possível preparar o upload.',
+      });
     }
   },
 );
@@ -125,19 +114,18 @@ router.get(
 /**
  * GET /storage/objects/*
  *
- * Serve object entities from PRIVATE_OBJECT_DIR.
- * These are served from a separate path from /public-objects and can optionally
- * be protected with authentication or ACL checks based on the use case.
+ * Serves a private document to its authenticated owner.
  */
 router.get('/storage/objects/*path', async (req: Request, res: Response) => {
+  if (!req.isAuthenticated()) {
+    res.status(401).json({ error: 'Unauthorized' });
+    return;
+  }
+
+  const raw = req.params.path;
+  const objectPath = Array.isArray(raw) ? raw.join('/') : raw;
+
   try {
-    const raw = req.params.path;
-    const wildcardPath = Array.isArray(raw) ? raw.join('/') : raw;
-    const objectPath = `/objects/${wildcardPath}`;
-    if (!req.isAuthenticated()) {
-      res.status(401).json({ error: 'Unauthorized' });
-      return;
-    }
     const [attachment] = await db
       .select({ id: attachmentsTable.id })
       .from(attachmentsTable)
@@ -148,29 +136,40 @@ router.get('/storage/objects/*path', async (req: Request, res: Response) => {
         ),
       )
       .limit(1);
+
     if (!attachment) {
       res.status(404).json({ error: 'Object not found' });
       return;
     }
-    const objectFile =
-      await objectStorageService.getObjectEntityFile(objectPath);
 
-    const response = await objectStorageService.downloadObject(objectFile);
-
-    res.status(response.status);
-    response.headers.forEach((value, key) => res.setHeader(key, value));
-
-    if (response.body) {
-      const nodeStream = Readable.fromWeb(
-        response.body as ReadableStream<Uint8Array>,
-      );
-      nodeStream.pipe(res);
-    } else {
-      res.end();
+    const result = await downloadObject(objectPath);
+    if (result.statusCode !== 200 || !result.stream) {
+      res.status(404).json({ error: 'Object not found' });
+      return;
     }
+
+    res.status(200);
+    res.setHeader(
+      'Content-Type',
+      result.blob.contentType ?? 'application/octet-stream',
+    );
+    if (result.blob.size) {
+      res.setHeader('Content-Length', String(result.blob.size));
+    }
+    res.setHeader('Cache-Control', 'private, no-cache');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    if (result.blob.etag) {
+      res.setHeader('ETag', result.blob.etag);
+    }
+
+    Readable.fromWeb(result.stream as Parameters<typeof Readable.fromWeb>[0])
+      .on('error', (error) => {
+        req.log.error({ err: error }, 'Error streaming object');
+        res.destroy(error);
+      })
+      .pipe(res);
   } catch (error) {
     if (error instanceof ObjectNotFoundError) {
-      req.log.warn({ err: error }, 'Object not found');
       res.status(404).json({ error: 'Object not found' });
       return;
     }
@@ -178,5 +177,29 @@ router.get('/storage/objects/*path', async (req: Request, res: Response) => {
     res.status(500).json({ error: 'Failed to serve object' });
   }
 });
+
+function parseClientPayload(
+  clientPayload: string | null | undefined,
+): { orderId: number; contentType: string; size: number } | null {
+  if (!clientPayload) return null;
+  try {
+    const value = JSON.parse(clientPayload) as Record<string, unknown>;
+    const orderId = Number(value.orderId);
+    const contentType = value.contentType;
+    const size = Number(value.size);
+    if (
+      !Number.isInteger(orderId) ||
+      orderId <= 0 ||
+      typeof contentType !== 'string' ||
+      !Number.isFinite(size) ||
+      size <= 0
+    ) {
+      return null;
+    }
+    return { orderId, contentType, size };
+  } catch {
+    return null;
+  }
+}
 
 export default router;

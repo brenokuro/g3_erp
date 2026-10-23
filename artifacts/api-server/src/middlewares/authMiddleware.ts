@@ -1,15 +1,7 @@
 import type { AuthUser } from '@workspace/api-zod';
 import { type NextFunction, type Request, type Response } from 'express';
-import * as oidc from 'openid-client';
 
-import {
-  clearSession,
-  getOidcConfig,
-  getSession,
-  getSessionId,
-  updateSession,
-  type SessionData,
-} from '../lib/auth';
+import { clearSession, getSession, getSessionId } from '../lib/auth';
 
 declare global {
   namespace Express {
@@ -27,30 +19,6 @@ declare global {
   }
 }
 
-async function refreshIfExpired(
-  sid: string,
-  session: SessionData,
-): Promise<SessionData | null> {
-  const now = Math.floor(Date.now() / 1000);
-  if (!session.expires_at || now <= session.expires_at) return session;
-
-  if (!session.refresh_token) return null;
-
-  try {
-    const config = await getOidcConfig();
-    const tokens = await oidc.refreshTokenGrant(config, session.refresh_token);
-    session.access_token = tokens.access_token;
-    session.refresh_token = tokens.refresh_token ?? session.refresh_token;
-    session.expires_at = tokens.expiresIn()
-      ? now + tokens.expiresIn()!
-      : session.expires_at;
-    await updateSession(sid, session);
-    return session;
-  } catch {
-    return null;
-  }
-}
-
 export async function authMiddleware(
   req: Request,
   res: Response,
@@ -60,26 +28,23 @@ export async function authMiddleware(
     return this.user != null;
   } as Request['isAuthenticated'];
 
-  const sid = getSessionId(req);
-  if (!sid) {
-    next();
-    return;
-  }
+  try {
+    const sid = getSessionId(req);
+    if (!sid) {
+      next();
+      return;
+    }
 
-  const session = await getSession(sid);
-  if (!session?.user?.id) {
-    await clearSession(res, sid);
-    next();
-    return;
-  }
+    const session = await getSession(sid);
+    if (!session?.user?.id) {
+      await clearSession(res, sid);
+      next();
+      return;
+    }
 
-  const refreshed = await refreshIfExpired(sid, session);
-  if (!refreshed) {
-    await clearSession(res, sid);
+    req.user = session.user;
     next();
-    return;
+  } catch (error) {
+    next(error);
   }
-
-  req.user = refreshed.user;
-  next();
 }

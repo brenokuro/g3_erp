@@ -1,0 +1,13 @@
+.git
+.agents
+.cache
+.local
+.replit
+.replitignore
+artifacts/mockup-sandbox
+**/dist
+**/*.tsbuildinfo
+**/.tsbuildinfo
+node_modules
+.env
+.env.local
