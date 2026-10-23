@@ -1,7 +1,6 @@
 import type { AuthUser } from '@workspace/api-zod';
+import { db, usersTable } from '@workspace/db';
 import { type NextFunction, type Request, type Response } from 'express';
-
-import { clearSession, getSession, getSessionId } from '../lib/auth';
 
 declare global {
   namespace Express {
@@ -19,32 +18,63 @@ declare global {
   }
 }
 
-export async function authMiddleware(
-  req: Request,
-  res: Response,
-  next: NextFunction,
-) {
-  req.isAuthenticated = function (this: Request) {
-    return this.user != null;
-  } as Request['isAuthenticated'];
+let cachedOwner: Express.User | null = null;
+
+async function getOrCreateOwner(): Promise<Express.User> {
+  if (cachedOwner) return cachedOwner;
 
   try {
-    const sid = getSessionId(req);
-    if (!sid) {
-      next();
-      return;
+    const [existing] = await db.select().from(usersTable).limit(1);
+    if (existing) {
+      cachedOwner = {
+        id: existing.id,
+        email: existing.email,
+        firstName: existing.firstName,
+        lastName: existing.lastName,
+        profileImageUrl: existing.profileImageUrl,
+      };
+      return cachedOwner;
     }
 
-    const session = await getSession(sid);
-    if (!session?.user?.id) {
-      await clearSession(res, sid);
-      next();
-      return;
-    }
+    const [created] = await db
+      .insert(usersTable)
+      .values({
+        id: 'default-owner',
+        email: 'oficina@local',
+        firstName: 'Oficina',
+        lastName: '3D',
+      })
+      .onConflictDoNothing()
+      .returning();
 
-    req.user = session.user;
-    next();
-  } catch (error) {
-    next(error);
+    cachedOwner = {
+      id: created?.id || 'default-owner',
+      email: created?.email || 'oficina@local',
+      firstName: created?.firstName || 'Oficina',
+      lastName: created?.lastName || '3D',
+      profileImageUrl: null,
+    };
+    return cachedOwner;
+  } catch {
+    return {
+      id: 'default-owner',
+      email: 'oficina@local',
+      firstName: 'Oficina',
+      lastName: '3D',
+      profileImageUrl: null,
+    };
   }
+}
+
+export async function authMiddleware(
+  req: Request,
+  _res: Response,
+  next: NextFunction,
+) {
+  req.isAuthenticated = function () {
+    return true;
+  } as Request['isAuthenticated'];
+
+  req.user = await getOrCreateOwner();
+  next();
 }

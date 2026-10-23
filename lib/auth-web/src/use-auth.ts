@@ -14,97 +14,38 @@ interface AuthState {
   clearError: () => void;
 }
 
-function getBasePath() {
-  return import.meta.env.BASE_URL.replace(/\/+$/, '') || '/';
-}
-
-function getErrorMessage(data: unknown): string {
-  if (data && typeof data === 'object' && 'error' in data) {
-    const error = (data as { error?: unknown }).error;
-    if (typeof error === 'string' && error.trim()) return error;
-  }
-  return 'Não foi possível entrar. Verifique os dados e tente novamente.';
-}
+const DEFAULT_USER: AuthUser = {
+  id: 'default-owner',
+  email: 'oficina@local',
+  firstName: 'Oficina',
+  lastName: '3D',
+  profileImageUrl: null,
+};
 
 export function useAuth(): AuthState {
-  const [user, setUser] = useState<AuthUser | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [isLoggingIn, setIsLoggingIn] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [user, setUser] = useState<AuthUser | null>(DEFAULT_USER);
 
   useEffect(() => {
-    let cancelled = false;
-
     fetch('/api/auth/user', { credentials: 'include' })
-      .then((res) => {
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        return res.json() as Promise<{ user: AuthUser | null }>;
-      })
+      .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
-        if (!cancelled) {
-          setUser(data.user ?? null);
-          setIsLoading(false);
+        if (data?.user) {
+          setUser(data.user);
         }
       })
-      .catch(() => {
-        if (!cancelled) {
-          setUser(null);
-          setIsLoading(false);
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
+      .catch(() => {});
   }, []);
 
-  const login = useCallback(async (email: string, password: string) => {
-    setIsLoggingIn(true);
-    setError(null);
-
-    try {
-      const response = await fetch('/api/auth/login', {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password }),
-      });
-
-      const data: unknown = await response.json().catch(() => null);
-      if (!response.ok) {
-        throw new Error(getErrorMessage(data));
-      }
-
-      const nextUser =
-        data && typeof data === 'object' && 'user' in data
-          ? ((data as { user: AuthUser | null }).user ?? null)
-          : null;
-      setUser(nextUser);
-    } catch (err) {
-      setError(
-        err instanceof Error && err.message
-          ? err.message
-          : 'Não foi possível entrar. Tente novamente.',
-      );
-      throw err;
-    } finally {
-      setIsLoggingIn(false);
-    }
-  }, []);
-
-  const logout = useCallback(() => {
-    const base = getBasePath();
-    window.location.href = `/api/logout?returnTo=${encodeURIComponent(base)}`;
-  }, []);
-
-  const clearError = useCallback(() => setError(null), []);
+  const login = useCallback(async () => {}, []);
+  const logout = useCallback(() => {}, []);
+  const clearError = useCallback(() => {}, []);
 
   return {
     user,
-    isLoading,
-    isAuthenticated: !!user,
-    isLoggingIn,
-    error,
+    isLoading: false,
+    isAuthenticated: true,
+    isLoggingIn: false,
+    error: null,
     login,
     logout,
     clearError,
