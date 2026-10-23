@@ -4,7 +4,6 @@
 .local
 .replit
 .replitignore
-artifacts/mockup-sandbox
 **/dist
 **/*.tsbuildinfo
 **/.tsbuildinfo
