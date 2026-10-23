@@ -51,6 +51,7 @@ app.use(express.urlencoded({ extended: true }));
 app.use(authMiddleware);
 
 app.use("/api", router);
+app.use(router);
 
 app.use((_req: Request, res: Response) => {
   res.status(404).json({ error: "Not found" });
